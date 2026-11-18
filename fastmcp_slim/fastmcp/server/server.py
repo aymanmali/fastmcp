@@ -917,12 +917,7 @@ class FastMCP(
 
         return [
             *[t for t in injected if t.task_config.supports_tasks()],
-            *[
-                c
-                for c in await self._apply_task_transforms(components)
-                if c.task_config.supports_tasks()
-                and not (isinstance(c, Tool) and c.name in claimed)
-            ],
+            *[c for c in components if not (isinstance(c, Tool) and c.name in claimed)],
         ]
 
     def add_transform(self, transform: Transform) -> None:

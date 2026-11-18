@@ -21,3 +21,20 @@ async def test_aggregate_provider_get_tasks_applies_transforms():
 
     tasks = await mcp.get_tasks()
     assert [c.key for c in tasks] == ["tool:math_square@"]
+
+
+async def test_fastmcp_server_namespace_transform_applied_once_in_get_tasks():
+    mcp = FastMCP("demo")
+
+    @mcp.tool(task=True)
+    async def slow_thing() -> str:
+        return "ok"
+
+    mcp.add_transform(Namespace("api"))
+
+    tool = await mcp.get_tool("api_slow_thing")
+    assert tool is not None
+    assert tool.key == "tool:api_slow_thing@"
+
+    tasks = await mcp.get_tasks()
+    assert [c.key for c in tasks] == ["tool:api_slow_thing@"]
