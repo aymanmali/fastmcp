@@ -789,6 +789,35 @@ class FastMCP(
         """Bundled extensions and auto-registerable registrations for composition."""
         return self._required_extensions()
 
+    def _check_no_mount_cycle(self, provider: Provider) -> None:
+        """Reject providers that directly or indirectly reference this server."""
+        from fastmcp.server.providers.aggregate import AggregateProvider
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
+        from fastmcp.server.providers.wrapped_provider import _WrappedProvider
+
+        visited: set[int] = set()
+        stack: list[Provider] = [provider]
+        while stack:
+            p = stack.pop()
+            if id(p) in visited:
+                continue
+            visited.add(id(p))
+            if p is self:
+                raise ValueError(
+                    f"Cannot attach provider to {self.name!r}: would create a mount cycle"
+                )
+            if isinstance(p, FastMCPProvider):
+                if p.server is self:
+                    raise ValueError(
+                        f"Cannot mount server {p.server.name!r} onto {self.name!r}: "
+                        "would create a mount cycle"
+                    )
+                stack.append(p.server)
+            elif isinstance(p, _WrappedProvider):
+                stack.append(p._inner)
+            elif isinstance(p, AggregateProvider):
+                stack.extend(p.providers)
+
     def add_provider(self, provider: Provider, *, namespace: str = "") -> None:
         """Add a provider for dynamic tools, resources, and prompts.
 
@@ -803,6 +832,7 @@ class FastMCP(
                 - Resources become "protocol://namespace/path"
                 - Prompts become "namespace_promptname"
         """
+        self._check_no_mount_cycle(provider)
         self._validate_provider_extensions(provider)
         self._register_provider_extensions(provider)
         super().add_provider(provider, namespace=namespace)
@@ -2499,35 +2529,8 @@ class FastMCP(
                 to override namespaced names. Keys are the original tool names from the
                 mounted server.
         """
-        from fastmcp.server.providers.aggregate import AggregateProvider
-        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
-        from fastmcp.server.providers.wrapped_provider import _WrappedProvider
-
         if server is self:
             raise ValueError("Cannot mount a server onto itself")
-
-        # Reject indirect cycles (e.g. A -> B -> A) before client connect hits RecursionError.
-        visited_providers: set[int] = set()
-        visited_servers: set[int] = {id(server)}
-        stack: list[Provider] = list(server.providers)
-        while stack:
-            p = stack.pop()
-            if id(p) in visited_providers:
-                continue
-            visited_providers.add(id(p))
-            if isinstance(p, FastMCPProvider):
-                if p.server is self:
-                    raise ValueError(
-                        f"Cannot mount server {server.name!r} onto {self.name!r}: "
-                        "would create a mount cycle"
-                    )
-                if id(p.server) not in visited_servers:
-                    visited_servers.add(id(p.server))
-                    stack.extend(p.server.providers)
-            elif isinstance(p, _WrappedProvider):
-                stack.append(p._inner)
-            elif isinstance(p, AggregateProvider):
-                stack.extend(p.providers)
 
         # Warn if parent masks errors but child doesn't (or vice versa)
         if self._mask_error_details and not server._mask_error_details:
@@ -2537,6 +2540,8 @@ class FastMCP(
                 f"{server.name!r} may leak through to clients. Set "
                 f"mask_error_details=True on the child server to prevent this."
             )
+
+        from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
 
         # Create provider and add it with namespace
         provider: Provider = FastMCPProvider(server)
