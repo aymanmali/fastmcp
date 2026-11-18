@@ -22,3 +22,22 @@ async def test_clear_deletes_beyond_10000_entries():
 
     remaining = [key for key in keys if await store.get(key) is not None]
     assert remaining == []
+
+
+async def test_clear_terminates_under_continuous_concurrent_writes():
+    counter = 0
+
+    class ReplenishingStore(MemoryStore):
+        async def keys(
+            self, collection: str | None = None, *, limit: int | None = None
+        ) -> list[str]:
+            nonlocal counter
+            counter += 1
+            return [f"key-{counter}"]
+
+        async def delete(self, key: str, *, collection: str | None = None) -> bool:
+            return True
+
+    store = KeyValueResponseCacheStore(storage=ReplenishingStore())
+    await store.clear()
+    assert counter == 100

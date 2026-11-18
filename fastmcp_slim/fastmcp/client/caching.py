@@ -197,7 +197,10 @@ class KeyValueResponseCacheStore:
         """
         storage = self._storage
         if isinstance(storage, AsyncEnumerateKeysProtocol):
-            while keys := await storage.keys(collection=self._collection):
+            for _ in range(100):
+                keys = await storage.keys(collection=self._collection)
+                if not keys:
+                    break
                 deleted = 0
                 for stored_key in keys:
                     if await storage.delete(
